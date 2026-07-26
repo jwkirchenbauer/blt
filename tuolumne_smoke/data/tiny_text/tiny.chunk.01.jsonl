@@ -1,0 +1,4 @@
+{"sample_id":"tuo-rank1-doc0","text":"A patch begins where the selected boundary rule says uncertainty or spacing warrants a new latent token. Local encoders still see every byte."}
+{"sample_id":"rank1-doc1","text":"ROCm maps PyTorch CUDA APIs onto AMD accelerators, while RCCL supplies collective communication among the four local ranks."}
+{"sample_id":"rank1-doc2","text":"Symbols !@#$%^&*() and digits 0123456789 exercise byte identities without requiring a learned subword tokenizer or vocabulary expansion."}
+{"sample_id":"rank1-doc3","text":"This shard is assigned to the second data-parallel worker during the four-GPU training smoke and loops when its rows are exhausted."}

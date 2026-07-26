@@ -1,0 +1,4 @@
+{"sample_id":"tuo-rank2-doc0","text":"The global transformer processes patch representations while small local modules encode and decode the bytes inside and around each patch."}
+{"sample_id":"rank2-doc1","text":"Naïve byte tokenization naturally handles 東京, Αθήνα, and emoji 🚀 because UTF-8 supplies a deterministic sequence of integer units."}
+{"sample_id":"rank2-doc2","text":"A distributed checkpoint contains model and optimizer state in distcp files plus per-rank iterator state for exact continuation."}
+{"sample_id":"rank2-doc3","text":"Loss values are not scientific results in this fixture; finite loss and gradients are the meaningful assertions for this stage."}

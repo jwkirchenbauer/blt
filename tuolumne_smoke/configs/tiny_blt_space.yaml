@@ -1,0 +1,132 @@
+name: blt-tiny-space-smoke
+dump_dir: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-tiny-space-train-1gpu
+seed: 777
+steps: 3
+max_steps: 3
+grad_acc_steps: 1
+gc_collect_freq: 1000
+probe_freq: null
+
+optim:
+  lr: 0.0004
+  weight_decay: 0.1
+  epsilon: 1.0e-08
+  beta1: 0.9
+  beta2: 0.95
+  clip: 1.0
+  scheduler: cosine
+  warmup: 0
+  lr_min_ratio: 0.1
+
+distributed:
+  dp_shard: 1
+  dp_replicate: 1
+  tp_size: 1
+  fsdp_type: no_shard
+  model_dtype: bf16
+  compile: false
+  selective_activation_checkpointing: false
+  matmul_allow_tf32: false
+
+env:
+  NCCL_DEBUG: WARN
+
+model:
+  seed: 42
+  vocab_size: 260
+  dim: 64
+  dim_global: 128
+  dim_local_encoder: 64
+  dim_local_decoder: 64
+  dim_token: 64
+  n_layers: 1
+  n_layers_global: 1
+  n_layers_local_encoder: 1
+  n_layers_local_decoder: 1
+  n_heads: 4
+  n_heads_global: 4
+  n_heads_local_encoder: 4
+  n_heads_local_decoder: 4
+  multiple_of: 32
+  ffn_dim_multiplier: 1.0
+  patch_size: 4
+  patching_mode: space
+  patch_in_forward: false
+  max_patch_length: 16
+  max_encoder_seq_length: 64
+  pad_to_max_length: true
+  encoder_hash_byte_group_size: [2]
+  encoder_hash_byte_group_vocab: 1024
+  encoder_hash_byte_group_nb_functions: 1
+  encoder_enable_byte_ngrams: false
+  cross_attn_encoder: true
+  cross_attn_decoder: true
+  cross_attn_window_encoder: 16
+  cross_attn_window_decoder: 16
+  cross_attn_k: 1
+  cross_attn_nheads: 4
+  cross_attn_all_layers_encoder: true
+  cross_attn_all_layers_decoder: true
+  cross_attn_use_flex_attention: true
+  cross_attn_init_by_pooling: true
+  tie_local_encoder_decoder_logits: false
+  use_local_encoder_transformer: true
+  share_encoder_decoder_emb: true
+  downsampling_by_pooling: max
+  log_patch_lengths: true
+  non_linearity: swiglu
+  use_rope: true
+  recompute_fc1_out: false
+  recompute_fc3_out: false
+  recompute_attn: false
+  custom_bwd: false
+  layer_ckpt: none
+  init_use_gaussian: true
+  init_use_depth: current
+  attn_impl: xformers
+  attn_bias_type: block_causal
+  alpha_depth: disabled
+  max_length: 64
+  local_attention_window_len: 64
+
+data:
+  root_dir: ./tuolumne_smoke/data
+  sources:
+    tiny_text: 1.0
+  batch_size: 1
+  seq_len: 8
+  buffer_size: 2
+  arrow_batch_size: 4
+  load_async: false
+  prefetch_size: 2
+  preprocess_dir: null
+  file_format: json
+  max_encoder_seq_length: 64
+  pad_to_max_length: true
+  add_patches: true
+  tokenizer_args:
+    name: blt
+  patcher_args:
+    patching_mode: space
+    patch_size: 4
+    max_patch_length: 16
+    device: cpu
+    patching_device: cpu
+
+profiling:
+  run: false
+
+checkpoint:
+  dump:
+    every: -1
+    keep: 2
+  eval:
+    every: -1
+    keep: 2
+
+logging:
+  freq: 1
+  wandb: null
+
+eval_on_gpus: null
+eval: null

@@ -1,0 +1,4 @@
+{"sample_id":"tuo-rank0-doc0","text":"Byte latent models read raw UTF-8 bytes and group familiar spans into patches. This tiny sample checks spaces, punctuation, and document boundaries."}
+{"sample_id":"rank0-doc1","text":"Café naïve résumé — multilingual bytes should remain ordinary model inputs. A short training smoke only needs enough words to fill several patches."}
+{"sample_id":"rank0-doc2","text":"def fibonacci(n): return n if n < 2 else fibonacci(n-1) + fibonacci(n-2). Code-like text provides a different local byte pattern."}
+{"sample_id":"rank0-doc3","text":"Repeated optimizer steps are intentionally tiny here; the goal is plumbing, gradients, checkpoint output, and reload rather than useful convergence."}

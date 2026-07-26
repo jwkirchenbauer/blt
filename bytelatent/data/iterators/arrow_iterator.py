@@ -289,7 +289,7 @@ class ArrowFileIterator(StatefulIterator):
             else:
                 filesystem = None
             self.dataset = pa.dataset.dataset(
-                self.dataset_files, format="arrow", filesystem=filesystem
+                self.dataset_files, format=self.file_format, filesystem=filesystem
             )
             self.batch_iterator = self.dataset.to_batches(
                 batch_size=self.arrow_batch_size

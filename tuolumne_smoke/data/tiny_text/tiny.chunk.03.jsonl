@@ -1,0 +1,4 @@
+{"sample_id":"tuo-rank3-doc0","text":"Dynamic patch lengths make the global sequence shorter than the underlying byte stream, which is the core efficiency idea explored by BLT."}
+{"sample_id":"rank3-doc1","text":"The local decoder reconstructs next-byte logits after global patch computation, preserving a fixed vocabulary of 256 bytes and special IDs."}
+{"sample_id":"rank3-doc2","text":"Four independent input shards ensure that each replicated or sharded rank advances a distinct data iterator during the collective smoke test."}
+{"sample_id":"rank3-doc3","text":"If this finishes, the launcher, environment, data pipeline, xFormers kernels, backward pass, optimizer, and save path have all participated."}

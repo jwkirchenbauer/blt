@@ -46,13 +46,20 @@ default_no_recompute_ops = {
     torch.ops.aten._scaled_dot_product_efficient_attention.default,
     torch.ops.aten._scaled_dot_product_flash_attention.default,
     torch.ops.c10d_functional.reduce_scatter_tensor.default,
-    torch.ops.xformers_flash.flash_fwd.default,
 }
 
+
+def _add_optional_xformers_op(namespace: str, name: str) -> None:
+    op_namespace = getattr(torch.ops, namespace)
+    if hasattr(op_namespace, name):
+        default_no_recompute_ops.add(getattr(op_namespace, name).default)
+
+
+_add_optional_xformers_op("xformers_flash", "flash_fwd")
+_add_optional_xformers_op("xformers", "efficient_attention_forward_ck")
+
 if int(os.environ.get("BLT_ALLOW_MISSING_FLEX_ATTENTION", False)) == 0:
-    default_no_recompute_ops.add(
-        torch.ops.xformers.efficient_attention_forward_cutlass.default
-    )
+    _add_optional_xformers_op("xformers", "efficient_attention_forward_cutlass")
 
 
 class DistributedArgs(BaseModel):
