@@ -81,6 +81,15 @@ notebook's actual code cells sequentially in one shared namespace. Job
 Unicode patch inspection returned 28 patches, and the active 16-byte example
 generated `" Paris. The capi"` with an 8.931 GiB peak allocation.
 
+The larger `facebook/blt-7b` checkpoint also fits comfortably on one MI300A.
+Cold-cache job `f3NkXrAkXPao` downloaded and loaded its 10,553,570,560
+parameters in 276.16 seconds, then generated 16 bytes in 43.15 seconds with a
+20.133 GiB peak allocation. Warm-cache job `f3NkbDpqn1W7`, using 24 CPU cores,
+loaded in 166.29 seconds and generated the same 16 bytes in 27.00 seconds.
+Both completed all notebook cells cleanly. Select it by changing `BLT_REPO`
+in the loading cell to `facebook/blt-7b`; its files are now present in the
+shared Hugging Face cache used by the notebook.
+
 The four JSONL shards are deliberately tiny fixtures, not training data for a
 meaningful model. The successful tests used raw JSONL, space patching, bf16,
 xFormers local/global attention, FlexAttention cross-attention, optimizer

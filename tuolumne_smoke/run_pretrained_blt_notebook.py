@@ -7,14 +7,29 @@ each code cell is compiled and executed in order in one shared namespace.
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 from pathlib import Path
 
 
 NOTEBOOK = Path(__file__).with_name("pretrained_blt_exploration.ipynb")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--blt-repo",
+        help="Override the notebook's default Hugging Face BLT repository.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    if args.blt_repo is not None:
+        os.environ["BLT_REPO"] = args.blt_repo
+
     notebook = json.loads(NOTEBOOK.read_text())
     namespace = {
         "__name__": "__blt_notebook__",
