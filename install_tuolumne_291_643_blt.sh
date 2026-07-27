@@ -103,6 +103,11 @@ cd "${REPO}"
 MAX_JOBS=48 PYTORCH_ROCM_ARCH='gfx942' GPU_ARCHS='gfx942' \
     python -m pip install -r requirements.txt
 
+# Add generic support for notebooks.
+MAX_JOBS=48 PYTORCH_ROCM_ARCH='gfx942' GPU_ARCHS='gfx942' \
+    python -m pip install \
+        jupyterlab
+
 # Imported by BLT's entropy preprocessing and Hugging Face model-loading paths
 # but omitted from the upstream requirements files. hf_xet enables the transfer
 # backend used by the official Meta checkpoint repositories.
