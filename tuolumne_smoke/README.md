@@ -66,6 +66,21 @@ python -u tuolumne_smoke/consolidated_checkpoint_forward.py \
   --checkpoint-dir PATH_TO_CHECKPOINT_STEP
 ```
 
+For interactive pretrained exploration, open
+`tuolumne_smoke/pretrained_blt_exploration.ipynb` with a kernel from
+`$WRKSPC/tuolumne_conda_291_643_blt` inside a compute-node allocation. The
+notebook loads `facebook/blt-1b` and its nested entropy model once on GPU 0,
+then provides reusable cells for patch inspection, greedy or sampled
+generation, variable-length batched generation, and teacher-forced BPB
+scoring. Its single-process RCCL setup is self-contained and does not require
+`torchrun`.
+
+`run_pretrained_blt_notebook.py` is a validation driver that executes the
+notebook's actual code cells sequentially in one shared namespace. Job
+`f3NkQb4gwC8X` ran all eight cells on an MI300A: the one-time load completed,
+Unicode patch inspection returned 28 patches, and the active 16-byte example
+generated `" Paris. The capi"` with an 8.931 GiB peak allocation.
+
 The four JSONL shards are deliberately tiny fixtures, not training data for a
 meaningful model. The successful tests used raw JSONL, space patching, bf16,
 xFormers local/global attention, FlexAttention cross-attention, optimizer
