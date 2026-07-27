@@ -28,11 +28,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-gen-len", type=int, default=16)
     parser.add_argument("--prompt", action="append")
     parser.add_argument("--shard-prompts-by-rank", action="store_true")
+    parser.add_argument(
+        "--eager-block-mask",
+        action="store_true",
+        help=(
+            "Diagnostic: disable compilation only while constructing BLT "
+            "cross-attention BlockMask metadata."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.eager_block_mask:
+        os.environ["BLT_COMPILE_BLOCK_MASK"] = "0"
+        print("Using eager BLT cross-attention BlockMask construction", flush=True)
+
     prompts = args.prompt or ["A byte-latent transformer"]
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))

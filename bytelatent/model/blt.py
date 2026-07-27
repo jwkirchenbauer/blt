@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
+import os
 from enum import Enum, auto
 from typing import Any, Optional
 
@@ -275,7 +276,12 @@ def cross_attn_mask(
                 H=None,
                 Q_LEN=q_len,
                 KV_LEN=kv_len,
-                _compile=True,
+                # PyTorch 2.9 deprecates this internal compilation path and
+                # recommends the eager metadata builder used by default.
+                # It also avoids a ROCm Triton memory fault for batched masks.
+                _compile=bool(
+                    int(os.environ.get("BLT_COMPILE_BLOCK_MASK", "0"))
+                ),
             )
             return block_mask
         else:
