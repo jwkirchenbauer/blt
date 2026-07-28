@@ -496,6 +496,12 @@ def train(args: TrainArgs):
             step_tok_losses.append(tok_loss / train_state.scale)
 
             world_size = get_world_size()
+            # Gradients are reduced and accumulated after every backward. Only
+            # clip the complete accumulated gradient immediately before the
+            # optimizer update; clipping each microbatch changes the update.
+            clip_max_norm = (
+                args.optim.clip if train_state.acc_step == 0 else float("inf")
+            )
             if 1 < world_size <= 8:
                 # For some reason, there are errors in reduces due to
                 # not working for non-bf16 numbers. This function is a patched
@@ -503,11 +509,11 @@ def train(args: TrainArgs):
                 # The error only happens in distributed training on one node,
                 # hence the guard
                 grad_norm = fixed_clip_grad_norm_(
-                    model.parameters(), max_norm=args.optim.clip, foreach=True
+                    model.parameters(), max_norm=clip_max_norm, foreach=True
                 )
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), max_norm=args.optim.clip, foreach=True
+                    model.parameters(), max_norm=clip_max_norm, foreach=True
                 )
 
             grad_norm = (
@@ -720,7 +726,15 @@ def train(args: TrainArgs):
                             )
                         )
 
-            if preemption_flag["flag"]:
+            if preemption_flag["flag"] and train_state.acc_step != 0:
+                logger.warning(
+                    "Deferring preemption checkpoint until the accumulated "
+                    "optimizer update is complete (acc_step=%s/%s)",
+                    train_state.acc_step,
+                    args.grad_acc_steps,
+                )
+
+            if preemption_flag["flag"] and train_state.acc_step == 0:
                 if not saved:
                     if (
                         args.data.load_async

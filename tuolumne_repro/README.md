@@ -48,6 +48,19 @@ plugin rather than relying on the launcher's older default:
   /collab/usr/global/tools/rccl/toss_4_x86_64_ib_cray/rocm-6.4.1/install/lib
 ```
 
+Set the Inductor cache in the target command, after environment activation:
+
+```bash
+TORCHINDUCTOR_CACHE_DIR="/l/ssd/$USER/blt_rank_$RANK"
+```
+
+The environment otherwise replaces the launcher's node-local cache with a
+shared workspace directory. Reusing already-built kernels can hide the
+problem, but concurrent first-use compilation of a new shape from 64 ranks
+produced stale file handles and partial Triton-module imports. A rank-local
+cache avoids that shared-filesystem race; it does not change generated
+kernels or model math.
+
 Use these launcher resource presets. In every GPU case, `tasks_per_node=4`
 means one process per MI300A and `cpus_per_task=24`; do not replace this with
 an internal `torchrun`.
@@ -57,7 +70,7 @@ an internal `torchrun`.
 | Download, scan, shuffle, or audit | `pbatch` | 1 | 1 | 1 | 96 |
 | Entropy-model training | `pbatch` | 2 | 4 | 4 | 24 |
 | Official or scratch entropy scoring | `pbatch` | 16 | 4 | 4 | 24 |
-| Rejected main-model memory candidate | `pbatch` | 16 | 4 | 4 | 24 |
+| Main-model 16-node fallback gates | `pdebug` / `pbatch` | 16 | 4 | 4 | 24 |
 | Primary main-model topology candidate | `pbatch` | 32 | 4 | 4 | 24 |
 | Released-topology fallback | `pbatch` | 64 | 4 | 4 | 24 |
 
@@ -149,31 +162,62 @@ truncation. Its final byte accounting will use observed non-padding positions.
 
 ## Training topology gates
 
-The 16-node candidate was tested first, but batch 16 exhausted node-wide
-MI300A memory during the first forward pass even with 64-way full-shard FSDP.
-The next Tuolumne candidate is therefore 32 nodes, with the released 64-node
-placement retained as a concurrently queued fallback:
+The 32- and 64-node gates remained valid but unscheduled overnight in a
+heavily queued `pbatch`; even the independent one-node preparation job did
+not backfill. Their failure to start was scheduler pressure, not a systems
+result. After the 64-rank accumulation gate passed, the 16-node accumulation
+topology was selected for the 100B reproduction and the unstarted 32-node,
+64-node, and direct-mask comparison jobs were canceled. The controlled
+alternatives were:
 
-| Setting | Released / fallback | Rejected candidate | Primary candidate |
-| --- | ---: | ---: | ---: |
-| Nodes | 64 | 16 | 32 |
-| GPUs / data-parallel ranks | 256 | 64 | 128 |
-| Sequences per rank | 4 | 16 | 8 |
-| Patches per sequence | 4096 | 4096 | 4096 |
-| Global patches per update | 4,194,304 | 4,194,304 | 4,194,304 |
-| Gradient accumulation | 1 | 1 | 1 |
+| Setting | Released | 32N candidate | 16N direct-mask | 16N accumulation |
+| --- | ---: | ---: | ---: | ---: |
+| Nodes | 64 | 32 | 16 | 16 |
+| Data-parallel ranks | 256 | 128 | 64 | 64 |
+| Physical batch / rank | 4 | 8 | 16 | 4 |
+| Accumulation steps | 1 | 1 | 1 | 4 |
+| Patches / sequence | 4096 | 4096 | 4096 | 4096 |
+| Global patches / update | 4,194,304 | 4,194,304 | 4,194,304 | 4,194,304 |
 
-This preserves the mathematical global batch and optimizer cadence. It changes
-only where examples and FSDP shards are placed. If the 128-rank collective
-gate fails for a reason other than scheduling, the remaining exact fallback is
-64 nodes / 256 GPUs / batch 4 per rank, which matches the released placement.
-The checked configurations are `configs/blt_1b_32n_100b.yaml` and
-`configs/blt_1b_64n_100b.yaml`, respectively.
+All alternatives preserve the global patch batch, optimizer-step count,
+warmup, scheduler, and checkpoint cadence. Only the released 64-node
+placement preserves the original rank topology. The 32-node configuration is
+`configs/blt_1b_32n_100b.yaml`; the exact released fallback is
+`configs/blt_1b_64n_100b.yaml`.
 
-Do not introduce gradient accumulation as an expedient. The current BLT loop
-clips gradients after every microbatch and does not suppress intermediate
-FSDP synchronization, so accumulation is not equivalent to the released
-update when clipping activates.
+The initial 16-node/batch-16 gate failed in eager BlockMask metadata
+construction. `BLT_DIRECT_BLOCK_MASK=1` is an opt-in implementation candidate
+that expresses the identical element relation directly from compact patch
+IDs instead of retaining dense Boolean tensors in the `BlockMask` closure.
+It does not change the attention mask, model, optimizer, or data. The
+associated configuration is `configs/blt_1b_16n_directmask_100b.yaml`; the
+flag must also be recorded in the launch command.
+
+The scientifically closest 16-node fallback is 64 ranks, physical batch 4,
+and four microbatches. Keeping physical batch 4 matters: BLT normalizes
+masked byte loss independently on every local batch, and variable byte counts
+mean that batch 8 or 16 does not weight examples identically to four
+released-shape batch-4 microbatches. The configuration is
+`configs/blt_1b_16n_acc4_100b.yaml`. This gate has completed two optimizer
+updates successfully; detailed results are recorded below.
+
+The training loop divides each microbatch loss by the accumulation count and
+FSDP2 reduce-scatters every backward, accumulating the resulting gradient
+shards. Synchronization is intentionally retained: it uses more communication
+but avoids holding full unsharded gradients. The loop now applies gradient
+clipping only on the final microbatch, after the complete gradient has
+accumulated. A preemption signal is likewise deferred until the current
+optimizer update finishes because checkpoints do not preserve partial
+parameter gradients. Both corrections are no-ops when the released
+`grad_acc_steps=1`.
+
+In exact arithmetic, averaging four 64-rank batch-4 gradients is the same
+average over 256 released-shape local losses as one 256-rank collective. The
+reduction tree and BF16/FP32 accumulation order differ in floating point.
+World size also changes the loader topology: world 64 has one shuffled stream
+per canonical chunk, whereas world 256 creates four independently buffered
+strided streams per chunk. The input record multiset is unchanged, but order,
+grouping, and rank-local RNG evolution are not.
 
 ## Public data specification
 
@@ -337,6 +381,19 @@ Run these as targets under the Tuolumne launcher. The inventory and pinned
 tool build are already complete. The combined fail-fast implementation of
 this sequence is `prepare_100b.sh`.
 
+The same byte-identical workflow can be run as three artifact-gated stages:
+
+```bash
+bash tuolumne_repro/prepare_100b.sh download-scan
+bash tuolumne_repro/prepare_100b.sh materialize
+bash tuolumne_repro/prepare_100b.sh audit-views
+```
+
+Staging changes only allocation length and backfill behavior. The selected
+source manifest, 192-GiB `terashuf` run, seed, record stream, validation
+extraction, and audits are identical to `prepare_100b.sh all`. Completed
+immutable artifacts are validated and reused between stages.
+
 ```bash
 # Freeze upstream inventory and build the exact shuffle implementation.
 python -u tuolumne_repro/data_pipeline.py inventory
@@ -489,12 +546,14 @@ count without repeating its chunk.
   repository-equivalent validation removal.
 - Require the audited post-validation training chunks to contain at least
   100B unique text bytes before any training starts.
-- Require every calibrated chunk to contain enough complete 512-sequence
-  shuffle buffers for all 5,299 optimizer updates. At batch 8, one buffer
-  supplies 64 updates; 83 complete buffers require 174,063,616 patches per
-  strided rank stream. This conservative buffer-aware gate prevents the first
-  buffer that crosses a shard boundary from silently mixing repeated
-  documents.
+- Require every calibrated rank stream to contain enough complete
+  512-sequence shuffle buffers for all 5,299 optimizer updates. At the
+  32-node batch-8 setting, one buffer supplies 64 updates; 83 complete buffers
+  require 174,063,616 patches per strided rank stream. At the 16-node
+  batch-4/accumulation-4 setting, one buffer supplies 32 updates; 166 complete
+  buffers require 348,127,232 patches in each canonical rank stream. This
+  conservative buffer-aware gate prevents a buffer that crosses a shard
+  boundary from silently mixing repeated documents.
 - If any rank fails that capacity gate, extend the frozen whole-file prefix
   and create a new immutable materialization. Do not compensate with an extra
   epoch or by allowing only the short ranks to repeat.
@@ -519,8 +578,10 @@ Run the controls in this order:
 4. The released fixed threshold `1.335442066192627` is a diagnostic for
    distribution shift, not the primary setting.
 
-Use 32 nodes, 128 ranks, batch 8, and no accumulation if the final collective
-gate passes. Compare training curves and held-out BPB across
+The selected production topology is 16 nodes, 64 ranks, physical batch 4,
+and four accumulation steps. It is the lowest-difference topology that
+passed its bounded collective and recipe gates while remaining practical to
+schedule. Compare training curves and held-out BPB across
 Wikipedia, DCLM/Common-Crawl, GitHub, and the frozen training distribution.
 The paper's matching 100B cross-attention row is context, not a strict
 acceptance target, because its corpus and validation samples are unavailable.
@@ -546,7 +607,9 @@ change as a scientifically meaningful implementation difference.
 | Entropy width is 512 in prose but 768 in released artifacts | Resolved | Follow released checkpoint: width 768 |
 | Paper says cosine decay to zero; released main config uses minimum ratio 0.01 | Resolved | Follow released checkpoint for checkpoint reproduction |
 | Paper's final 8B uses monotonicity/newline resets | Not applicable | Reproduce released 1B global thresholding without them |
-| 128 ranks instead of 256 | Intentional, bounded | Preserve exact global patches/update with batch 8 and no accumulation; 64-rank/batch-16 was rejected by the measured memory gate |
+| Fewer than 256 data-parallel ranks | Intentional, bounded | Preserve exact global patches/update; prefer 128 ranks/batch 8 without accumulation, otherwise use 64 ranks/batch 4/accumulation 4 and record changed collective reduction and data-stream topology |
+| Compact BlockMask construction | Opt-in systems candidate | `BLT_DIRECT_BLOCK_MASK=1` preserves the exact compiled attention relation while avoiding dense closure storage; retain as a separately identified implementation ablation |
+| Gradient accumulation at 16 nodes | Intentional, scientifically relevant | Keep the released physical batch 4, average four microbatch gradients, clip only the complete gradient, and finish a partial update before a preemption checkpoint |
 | Pinned `terashuf` instead of an unpinned clone plus unsorted `find` | Reproducibility hardening, no algorithm change | Pin source/compiler/seed/memory and feed the exact source manifest order |
 | LF insertion at DCLM archive boundaries | Correctness repair to stock public-data command | Add a delimiter only between files when the preceding archive lacks LF; record the count and require exact record-multiset parity |
 | Hash-based shuffle | Contingency only, scientifically meaningful | Do not use unless measured `terashuf` gates fail; retain as an explicit ablation if used |
@@ -736,7 +799,8 @@ Its two updates had finite loss and gradients, no allocator retries or OOMs,
 GPU. The first update took 40.32 seconds after a 122.20-second initial data
 wait; the warm update took 4.83 seconds with a 0.007-second data wait. At 128
 ranks, batch 8 preserves the released 4,194,304 patches per optimizer update
-exactly, so 32 nodes is already a viable unchanged-math fallback.
+exactly, so 32 nodes is a memory-feasible unchanged-math candidate; its actual
+128-rank collective gate was not run before topology selection.
 
 The topology tests were deliberately incremental. The first successful
 main-model test used the released batch 4 and approximately 35% of one MI300A.
@@ -796,36 +860,138 @@ OOM kills with measured host peaks of 52.58--54.36 GiB; a surviving rank ended
 in `MemoryError` while `create_block_mask` was constructing the decoder
 cross-attention mask in `bytelatent/model/blt.py`. This reproduces the
 four-rank batch-16 failure after removing the confounding large debug log and
-decisively rejects the 16-node placement under the unchanged implementation.
+rejects batch 16 with the original dense-closure implementation.
+
+The follow-up one-GPU mask probe `f3NurCYanfgT` compared the original
+dense-closure path with the opt-in direct relation. Their element masks,
+BlockMask metadata, sparsity, and outputs from the compiled FlexAttention
+function used by training were bitwise equal. At the official batch-16,
+24,576-byte, 4,096-patch shape, constructing and retaining both
+cross-attention orientations changed as follows:
+
+| BlockMask construction | Retained active | Peak active | Time |
+| --- | ---: | ---: | ---: |
+| Dense closure | 6.01 GiB | 81.01 GiB | 4.79 s |
+| Direct compact closure | 0.01 GiB | 30.01 GiB | 1.73 s |
+
+This 51.0 GiB peak reduction shows that the earlier OOM was dominated by
+metadata construction and warrants a full 16-node forward/backward gate. It
+does not by itself prove that all batch-16 model activations fit. The first
+direct gate, `f3Nun9uvD9HH`, consumed no training step because the launcher
+appended its own `--run_name` option to BLT's strict configuration parser.
+The corrected replacement, `f3NutpzJZTG3`, disabled that launcher metadata
+argument without changing the shared launcher or BLT parser, but the
+activated environment then replaced the launcher's node-local Inductor cache
+with a shared workspace path. Concurrent first-use compilation of the new
+batch-16 attention shape failed with stale file handles; this run likewise
+produced no model-memory result. Replacement job `f3Nv34fYY9CT` pins a
+rank-local `/l/ssd` cache in the target command. It was canceled at zero
+runtime after the accumulation topology was selected, so it is not a model
+result.
+
+The four-rank conservative memory control `f3Nv3RYzHHBD` then completed two
+batch-16 optimizer updates cleanly with the same isolated-cache command.
+Four-way FSDP is more demanding in model-state memory than the intended
+64-rank run. Peak active memory was 65% on the first update and 72% on the
+second, or approximately 83 and 92 GiB per MI300A, without an OOM. The
+second update took 109.9 seconds, however, versus about 8.56 seconds for four
+batch-4 microbatches on the 64-rank accumulation gate. This is not a
+topology-matched throughput comparison, and the first two direct-mask updates
+can still include shape-specific compilation, but it makes the direct path a
+systems ablation rather than the preferred 16-node recipe. Its 64-rank gate
+was canceled without starting after the accumulation topology was selected.
+
+The direct candidate also has an independently generated world-64 capacity
+report. It records physical batch 16, one microbatch per update, and the same
+16 effective sequences and 65,536 patches per rank per optimizer update as
+the accumulation candidate. Its machine-readable preflight passes every
+required recipe check. This confirms the configuration and data assignment;
+it is not a 64-rank forward/backward result.
+
+The alternative 16-node batch-4/accumulation-4 gate `f3NunQV9Xgoh` completed
+cleanly. It performed two optimizer updates, or eight physical batch-4
+forward/backward passes, with finite loss and gradients and no allocator
+retry, OOM, or process failure. Warm microbatches took about 2.14 seconds, so
+one four-microbatch optimizer update took about 8.56 seconds. Peak active
+memory was 26% of a 128 GiB MI300A, approximately 33 GiB.
+
+Linear projection of that bounded warm time gives 12.60 hours for 5,299
+updates. A first 16-node production attempt should therefore request at least
+16 hours in `pbatch` to cover model/data startup, periodic distributed
+checkpoints, filesystem variance, and the fact that two warm updates are not
+a sustained-throughput sample.
+
+Its world-64 capacity report uses one canonical chunk per rank and records
+physical batch 4, four accumulation steps, 16 effective sequences, and 65,536
+patches per rank per optimizer update. It requires 166 complete shuffle
+buffers, or 348,127,232 patches, in every production rank stream. The pilot
+report and recipe preflight both passed all required non-capacity checks; the
+pilot is intentionally too small to provide unique data for the bounded run.
 
 The primary 32-node/128-rank/batch-8 candidate leaves the global batch,
 sequence shape, optimizer cadence, data records, stored entropy values, and
 gradient-accumulation count unchanged. BLT assigns two strided workers to
 each existing canonical Arrow chunk, so this fallback requires no data
-reshard. Its bounded 128-rank collective test is queued as Flux job
-`f3NoWX2xK1hH`.
+reshard. Its bounded 128-rank collective job `f3NoWX2xK1hH` was canceled
+without starting after the 16-node topology was selected.
 
-The released 64-node/256-rank/batch-4 fallback is independently queued as
-Flux job `f3NoqY9Bkvij`. It uses the same two-update, no-checkpoint rehearsal
-and the same canonical pilot data, but assigns four strided workers to each
-of the 64 Arrow chunks. The corresponding world-256 audit contains 256 rank
-streams with 335,732--600,807 patches, mean 429,506.74, 11.89% CV, and 1.790
-max/min ratio. The pilot is intentionally too small for a complete shuffle
-buffer, but the topology-aware preflight passes every required recipe check;
-its report is
+The released 64-node/256-rank/batch-4 fallback job `f3NoqY9Bkvij` was
+likewise canceled without starting. It would have assigned four strided
+workers to each of the 64 Arrow chunks. The corresponding world-256 audit
+contains 256 rank streams with 335,732--600,807 patches, mean 429,506.74,
+11.89% CV, and 1.790 max/min ratio. The pilot is intentionally too small for
+a complete shuffle buffer, but the topology-aware preflight passes every
+required recipe check; its report is
 `tuo-runs/blt-repro-1b-preflight-v1/preflight-pilot-world256.json`.
 
-No 100B model-training run is authorized until at least one bounded topology
-gate reaches both optimizer steps and exits cleanly. If both pass, prefer the
-32-node candidate for schedulability while recording its topology difference;
-the 64-node result provides the exact released placement comparison.
+The 16-node accumulation gate establishes the selected main-model topology.
+No 100B model-training run has been launched: production still requires the
+scratch entropy checkpoint and scoring pass, calibrated threshold, and
+production capacity audit.
 
-The full data-preparation driver was submitted independently as one-node,
-six-hour `pbatch` job `f3NohQp6stes` (the unstarted 12-hour request
-`f3Nof4C2UZxb` was canceled to improve backfill). It downloads and
-SHA-verifies a 200-file planning envelope, freezes the shortest prefix
-reaching 110B pre-validation text bytes, materializes only that prefix with
-pinned `terashuf`, requires exact record-multiset parity and at least 100B
-post-validation training text, and then derives audited 8- and 4-chunk
-views. At the time of this note the job is pending; no long model-training
-run has started.
+The unstarted six-hour preparation request `f3NohQp6stes` was canceled after
+it failed to backfill overnight. The same fail-fast workflow then completed
+as the shorter staged jobs described above. It downloaded and SHA-verified a
+200-file planning envelope, froze the shortest prefix reaching 110B
+pre-validation text bytes, materialized only that prefix with pinned
+`terashuf`, required exact record-multiset parity and at least 100B
+post-validation training text, and derived audited 8- and 4-chunk views.
+
+### Production DCLM materialization result
+
+The staged preparation completed on July 28, 2026. The download/scan job
+`f3NvXiZN1oqR` verified all 200 files in the planning envelope. The shortest
+ordered prefix reaching the 110B-byte pre-validation target contains 185
+files:
+
+| Quantity | Result |
+| --- | ---: |
+| Planning-envelope records | 21,081,467 |
+| Planning-envelope UTF-8 text bytes | 119,402,452,761 |
+| Selected source files | 185 |
+| Selected records | 19,489,094 |
+| Selected UTF-8 text bytes | 110,421,147,778 |
+| Invalid source JSON records | 0 |
+
+The materialization job `f3NviZZdSd6f` used upstream `terashuf` revision
+`29a65ed74808925266a5dcf4ffccd29552dad0e0`, seed 42, and a 192 GiB memory
+allowance to create the canonical
+64-chunk dataset at
+`/p/vast1/pretrain/datasets/blt/prepared/dclm-100b-v1`. It produced
+19,489,094 shuffled records. The held-out validation files contain 640,000
+records; the remaining training corpus contains 18,849,094 unique records
+and 106,787,720,936 UTF-8 text bytes.
+
+The independent audit job `f3Nvt7twqVL3` established exact input/output
+record-multiset equality. Both sides contain 19,489,094 records,
+110,421,147,778 text bytes, and 141,179,140,829 canonical record bytes. The
+order-independent SHA-256 aggregate is
+`cf2e8974b832f115b2ab6f7b737aedb410cee1170e1a2fc4af633de66681413f`
+(sum) and
+`d50f70d941d2efaa496378b974ed9595203d9be73181b245e20e940764d1d0bd`
+(XOR). The lossless world-8 entropy training view and world-4 pilot view were
+derived from that canonical output and passed the same exact audit. These are
+data-layout transformations only; they do not change record contents or
+introduce a replacement shuffle. The 16-node recipe checker subsequently
+passed every required production-data and non-capacity gate; capacity remains
+intentionally pending until the full corpus has been entropy-scored.

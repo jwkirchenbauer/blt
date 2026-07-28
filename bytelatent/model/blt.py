@@ -251,6 +251,36 @@ def cross_attn_mask(
 ):
     bs = patch_ids.shape[0]
     with torch.no_grad():
+        q_len = patch_lengths.shape[1] * cross_attn_k if patches_as_queries else N
+        kv_len = N if patches_as_queries else patch_lengths.shape[1] * cross_attn_k
+        if block_mask and bool(
+            int(os.environ.get("BLT_DIRECT_BLOCK_MASK", "0"))
+        ):
+            # Define the same elementwise relation directly from compact patch
+            # IDs. This avoids retaining a dense [B, Q_LEN, KV_LEN] tensor in
+            # the BlockMask closure after its sparse metadata is constructed.
+            def patch_mask(b, h, q_idx, kv_idx):
+                if patches_as_queries:
+                    q_ids = q_idx // cross_attn_k
+                    kv_ids = patch_ids[b, kv_idx]
+                else:
+                    q_ids = patch_ids[b, q_idx]
+                    kv_ids = kv_idx // cross_attn_k
+                if window is None:
+                    return q_ids == kv_ids
+                return (kv_ids <= q_ids) & (q_ids < kv_ids + window)
+
+            return create_block_mask(
+                patch_mask,
+                B=bs,
+                H=None,
+                Q_LEN=q_len,
+                KV_LEN=kv_len,
+                _compile=bool(
+                    int(os.environ.get("BLT_COMPILE_BLOCK_MASK", "0"))
+                ),
+            )
+
         # Create the patch mask
         cross_mask = create_patch_mask_from_ids(
             patch_ids,
@@ -258,8 +288,6 @@ def cross_attn_mask(
             window=window,
             patches_as_queries=patches_as_queries,
         ).repeat_interleave(cross_attn_k, dim=1 if patches_as_queries else -1)
-        q_len = patch_lengths.shape[1] * cross_attn_k if patches_as_queries else N
-        kv_len = N if patches_as_queries else patch_lengths.shape[1] * cross_attn_k
         assert cross_mask.shape == (
             bs,
             q_len,

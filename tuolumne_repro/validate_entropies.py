@@ -230,7 +230,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.335442066192627,
     )
-    parser.add_argument("--capacity-batch-size", type=int, default=16)
+    parser.add_argument(
+        "--capacity-batch-size",
+        type=int,
+        default=16,
+        help="Physical per-rank microbatch size used for capacity accounting",
+    )
+    parser.add_argument(
+        "--capacity-grad-acc-steps",
+        type=int,
+        default=1,
+        help="Number of microbatches in each optimizer update",
+    )
     parser.add_argument("--capacity-seq-len", type=int, default=4096)
     parser.add_argument("--capacity-buffer-size", type=int, default=512)
     parser.add_argument("--capacity-steps", type=int, default=5299)
@@ -253,6 +264,8 @@ def main() -> None:
     output = checked_path(args.output)
     if args.capacity_workers_per_chunk < 1:
         raise ValueError("--capacity-workers-per-chunk must be positive")
+    if args.capacity_grad_acc_steps < 1:
+        raise ValueError("--capacity-grad-acc-steps must be positive")
     raw_files = sorted(input_dir.glob("*.chunk.*.jsonl"))
     arrow_files = sorted(entropy_dir.glob("*.chunk.*.jsonl.shard_*.arrow"))
     if not arrow_files:
@@ -355,14 +368,18 @@ def main() -> None:
     if sum(rank_stream_patch_counts) != calibrated["patches"]:
         raise RuntimeError("Rank-stream patches do not reconstruct the global total")
 
-    if args.capacity_buffer_size % args.capacity_batch_size != 0:
+    sequences_per_rank_step = (
+        args.capacity_batch_size * args.capacity_grad_acc_steps
+    )
+    if args.capacity_buffer_size % sequences_per_rank_step != 0:
         raise ValueError(
-            "--capacity-buffer-size must be divisible by --capacity-batch-size"
+            "--capacity-buffer-size must be divisible by the product of "
+            "--capacity-batch-size and --capacity-grad-acc-steps"
         )
-    patches_per_rank_step = args.capacity_batch_size * args.capacity_seq_len
+    patches_per_rank_step = sequences_per_rank_step * args.capacity_seq_len
     patches_per_buffer = args.capacity_buffer_size * args.capacity_seq_len
     optimizer_steps_per_buffer = (
-        args.capacity_buffer_size // args.capacity_batch_size
+        args.capacity_buffer_size // sequences_per_rank_step
     )
     stream_nominal_optimizer_steps = [
         patch_count // patches_per_rank_step
@@ -390,6 +407,8 @@ def main() -> None:
             "Arrow row indices where row_index % workers_per_chunk == worker_id"
         ),
         "batch_size_per_rank": args.capacity_batch_size,
+        "gradient_accumulation_steps": args.capacity_grad_acc_steps,
+        "sequences_per_rank_optimizer_step": sequences_per_rank_step,
         "patches_per_sequence": args.capacity_seq_len,
         "sequences_per_shuffle_buffer": args.capacity_buffer_size,
         "patches_per_rank_step": patches_per_rank_step,

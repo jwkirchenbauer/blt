@@ -1,0 +1,16 @@
+# Scientifically closest 16-node fallback:
+#   64 ranks * 4 sequences * 4 accumulation steps * 4096 patches
+#     = 4,194,304 patches/update.
+#
+# Keeping the released local batch of four preserves its masked-loss
+# normalization. Gradient clipping must occur only after all four
+# microbatches have accumulated.
+config: tuolumne_repro/configs/blt_1b_32n_100b.yaml
+
+distributed:
+  dp_replicate: 64
+
+data:
+  batch_size: 4
+
+grad_acc_steps: 4

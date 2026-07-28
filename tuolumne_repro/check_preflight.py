@@ -242,9 +242,9 @@ def main() -> None:
             (
                 candidate_main.distributed.dp_replicate,
                 candidate_main.data.batch_size,
+                candidate_main.grad_acc_steps,
             )
-            in ((128, 8), (256, 4))
-            and candidate_main.grad_acc_steps == 1
+            in ((64, 4, 4), (64, 16, 1), (128, 8, 1), (256, 4, 1))
         ),
         observed={
             "ranks": candidate_main.distributed.dp_replicate,
@@ -252,8 +252,12 @@ def main() -> None:
             "grad_acc_steps": candidate_main.grad_acc_steps,
         },
         expected={
-            "allowed_rank_batch_pairs": [[128, 8], [256, 4]],
-            "grad_acc_steps": 1,
+            "allowed_rank_batch_accumulation": [
+                [64, 4, 4],
+                [64, 16, 1],
+                [128, 8, 1],
+                [256, 4, 1],
+            ],
         },
     )
     main_data_fields = (
@@ -405,14 +409,23 @@ def main() -> None:
             capacity["workers_per_chunk"] == expected_workers_per_chunk
             and capacity["rank_streams"]
             == candidate_main.distributed.dp_replicate
+            and capacity["batch_size_per_rank"] == candidate_main.data.batch_size
+            and capacity.get("gradient_accumulation_steps", 1)
+            == candidate_main.grad_acc_steps
         ),
         observed={
             "workers_per_chunk": capacity["workers_per_chunk"],
             "rank_streams": capacity["rank_streams"],
+            "batch_size_per_rank": capacity["batch_size_per_rank"],
+            "gradient_accumulation_steps": capacity.get(
+                "gradient_accumulation_steps", 1
+            ),
         },
         expected={
             "workers_per_chunk": expected_workers_per_chunk,
             "rank_streams": candidate_main.distributed.dp_replicate,
+            "batch_size_per_rank": candidate_main.data.batch_size,
+            "gradient_accumulation_steps": candidate_main.grad_acc_steps,
         },
     )
     check(
