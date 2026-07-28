@@ -1,0 +1,91 @@
+# Released entropy-model recipe with only paths made Tuolumne-specific.
+# Intended topology: 2 nodes / 8 ranks / batch 8.  This exactly preserves the
+# released 64 sequences and 524,288 byte positions per optimizer update.
+
+config: bytelatent/configs/entropy_model.yaml
+
+dump_dir: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-entropy-100m-dclm-100b
+name: blt-repro-entropy-100m-dclm-100b
+steps: 100000
+max_steps: null
+seed: 42
+grad_acc_steps: 1
+
+optim:
+  lr: 4.0e-4
+  beta1: 0.9
+  beta2: 0.95
+  epsilon: 1.0e-8
+  weight_decay: 0.1
+  clip: 10.0
+  warmup: 500
+  scheduler: cosine
+  lr_min_ratio: 0.1
+
+distributed:
+  dp_replicate: 8
+  dp_shard: 1
+  tp_size: 1
+  fsdp_type: full_shard
+  model_dtype: bf16
+  matmul_allow_tf32: false
+  selective_activation_checkpointing: false
+  compile: false
+
+train_entropy_model: true
+model: null
+entropy_model:
+  dim: 768
+  n_layers: 14
+  n_heads: 12
+  max_seqlen: 8192
+  vocab_size: 260
+  ffn_dim_multiplier: 1.0
+  sliding_window: 512
+  attn_bias_type: local_block_causal
+  attn_impl: xformers
+  seed: 42
+  init_std_factor: current_depth
+
+data:
+  # The 8-chunk view is a lossless repartition of the canonical post-validation
+  # terashuf stream.  Using the canonical 64-chunk directory here would make
+  # the current loader silently discard 56 chunks.
+  root_dir: /p/vast1/pretrain/datasets/blt/prepared/dclm-100b-v1/views/world_0008
+  sources:
+    dclm_baseline_1.0: 1.0
+  file_format: json
+  batch_size: 8
+  seq_len: 8192
+  max_encoder_seq_length: 8192
+  buffer_size: 512
+  arrow_batch_size: 100
+  load_async: false
+  prefetch_size: 20
+  add_bos: true
+  add_eos: true
+  add_patches: false
+  pad_to_max_length: true
+  patcher_args:
+    patching_mode: byte
+  tokenizer_args:
+    name: blt
+
+checkpoint:
+  path: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-entropy-100m-dclm-100b/checkpoints
+  dump:
+    every: 500
+    keep: 3
+  eval:
+    every: 1000
+    keep: -1
+
+logging:
+  freq: 10
+  wandb: null
+
+env:
+  NCCL_DEBUG: WARN
+
+eval_on_gpus: null
+eval: null

@@ -1,0 +1,9 @@
+# Exact released data-parallel placement fallback for Tuolumne:
+#   256 ranks * 4 sequences * 4096 patches = 4,194,304 patches/update.
+config: tuolumne_repro/configs/blt_1b_32n_100b.yaml
+
+distributed:
+  dp_replicate: 256
+
+data:
+  batch_size: 4

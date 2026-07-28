@@ -369,6 +369,10 @@ def train(args: TrainArgs):
         while train_state.step < args.steps and (
             args.max_steps is None or train_state.step < args.max_steps
         ):
+            # Track whether the current state, rather than any earlier state,
+            # has been saved.  Otherwise one periodic checkpoint suppresses
+            # all later preemption and final checkpoints.
+            saved = False
             # We constrain train_state.acc_step to be in range 0 to args.grad_acc_steps - 1
             train_state.acc_step += 1
             train_state.acc_step = train_state.acc_step % args.grad_acc_steps

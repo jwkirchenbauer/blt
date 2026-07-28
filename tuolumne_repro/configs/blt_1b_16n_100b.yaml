@@ -1,0 +1,3 @@
+# Compatibility path for bounded subrunners generated before topology
+# selection. The selected recipe is 32 nodes / 128 ranks / batch 8.
+config: tuolumne_repro/configs/blt_1b_32n_100b.yaml

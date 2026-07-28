@@ -1,0 +1,233 @@
+# Released facebook/blt-1b architecture and optimizer recipe, adapted to the
+# 32-node / 128-rank topology.  The global patch batch is unchanged:
+#   128 ranks * 8 sequences * 4096 patches = 4,194,304 patches/update.
+#
+# Thresholds are intentionally missing.  Supply both calibrated values:
+#   data.patcher_args.threshold=<value>
+#   model.patching_threshold=<same value>
+
+dump_dir: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-1b-dclm-100b-scratch-entropy
+name: blt-repro-1b-dclm-100b-scratch-entropy
+steps: 5299
+max_steps: null
+seed: 42
+grad_acc_steps: 1
+gc_collect_freq: 1000
+probe_freq: null
+train_entropy_model: false
+entropy_model: null
+
+optim:
+  lr: 4.0e-4
+  beta1: 0.9
+  beta2: 0.95
+  epsilon: 1.0e-8
+  weight_decay: 0.1
+  clip: 1.0
+  warmup: 2000
+  scheduler: cosine
+  lr_min_ratio: 0.01
+  annealing_step: 1000
+  cosine_theta: 1.0
+  cycle_length: 1.0
+  decay_fraction: 0.1
+  exp_factor: 0.5
+
+distributed:
+  dp_replicate: 128
+  dp_shard: 1
+  tp_size: 1
+  fsdp_type: full_shard
+  model_dtype: bf16
+  float8_recipe: null
+  float8_filter: 'layers\.[0-9]+\.'
+  matmul_allow_tf32: false
+  allow_bf16_reduced_precision_reduction: true
+  selective_activation_checkpointing: true
+  compile: false
+  compile_cache_size_limit: 8
+  detect_anomaly: false
+  spawn_method: forkserver
+
+data:
+  root_dir: /p/vast1/pretrain/datasets/blt/prepared/dclm-100b-v1
+  sources:
+    dclm_baseline_1.0: 1.0
+  preprocess_dir: /p/vast1/pretrain/datasets/blt/entropy/dclm-100b-v1/scratch
+  entropy_model_name: transformer_100m
+  file_format: arrow
+  batch_size: 8
+  seq_len: 4096
+  max_encoder_seq_length: 24576
+  buffer_size: 512
+  arrow_batch_size: 20
+  load_async: true
+  async_persist_type: approximate
+  prefetch_size: 200
+  seed: 42
+  add_bos: true
+  add_eos: true
+  add_patches: true
+  pad_to_max_length: true
+  enable_byte_ngrams: false
+  patcher_args:
+    patching_mode: entropy
+    patching_device: cuda
+    device: cuda
+    realtime_patching: false
+    patching_batch_size: 1
+    patch_size: 4.5
+    threshold: ???
+    threshold_add: null
+    monotonicity: false
+    max_patch_length: null
+    entropy_model_checkpoint_dir: null
+    log_time: false
+  tokenizer_args:
+    name: blt
+    init_kwargs:
+      # Not opened because BPE delimiters are disabled.
+      bpe_tokenizer_path: /dev/null
+
+model:
+  architecture: vanilla
+  dim: 512
+  n_layers: 8
+  n_heads: 8
+  vocab_size: 260
+  output_size: -1
+  dim_global: 2048
+  n_layers_global: 25
+  n_heads_global: 16
+  n_kv_heads_global: null
+  dim_local_encoder: 1024
+  n_layers_local_encoder: 1
+  n_heads_local_encoder: 16
+  dim_local_decoder: 1024
+  n_layers_local_decoder: 9
+  n_heads_local_decoder: 16
+  n_kv_heads: null
+  head_dim: null
+  ffn_dim_multiplier: 1.0
+  multiple_of: 256
+  non_linearity: swiglu
+  dropout: 0.0
+  norm_eps: 1.0e-5
+  norm_type: rmsnorm
+  norm_affine: true
+  pre_norm: true
+  weight_tying: false
+  share_encoder_decoder_emb: true
+  tie_local_encoder_decoder: false
+  tie_local_encoder_decoder_logits: false
+  use_rope: true
+  rope_theta: 500000.0
+  rope_use_fp32_in_outer_product: true
+  seed: 42
+  init_use_gaussian: true
+  init_use_depth: current
+  init_std_factor: current_depth
+  init_base_std: null
+  alpha_depth: disabled
+  use_fsdp: true
+  sequence_parallel: false
+  fuse_sequence_parallel: false
+  loss_parallel: false
+  pm_size: 0
+  attn_impl: xformers
+  attn_bias_type: block_causal
+  attn_to_keep: all
+  local_attention_window_len: 512
+  max_seqlen: 4096
+  max_encoder_seq_length: 24576
+  max_length: 256
+  pad_to_max_length: true
+  patch_size: 4.5
+  patching_mode: entropy
+  patching_threshold: ???
+  patching_threshold_add: null
+  patching_thresholds_str: null
+  patching_batch_size: 1
+  patching_device: cuda
+  patch_in_forward: true
+  monotonicity: false
+  max_patch_length: null
+  entropy_model_checkpoint_dir: null
+  entropy_model_is_ngram_model: false
+  tokenize_with_bpe_delimiter: false
+  use_local_encoder_transformer: true
+  encoder_enable_byte_group_hash: false
+  encoder_hash_byte_group_size: [3, 4, 5, 6, 7, 8]
+  encoder_hash_byte_group_vocab: 500002
+  encoder_hash_byte_group_nb_functions: 1
+  encoder_enable_byte_ngrams: false
+  encoder_ngram_table_dir: null
+  encoder_ngram_to_size_str: null
+  ngram_vocab_sizes: null
+  encoder_lm_loss: false
+  encoder_preds_low_entropy_toks: null
+  encoder_preds_random_toks: null
+  cross_attn_encoder: true
+  cross_attn_decoder: true
+  cross_attn_k: 2
+  cross_attn_nheads: 16
+  cross_attn_all_layers_encoder: false
+  cross_attn_all_layers_decoder: true
+  cross_attn_use_flex_attention: true
+  cross_attn_init_by_pooling: true
+  cross_attn_window_encoder: null
+  cross_attn_window_decoder: null
+  downsampling_by_pooling: max
+  dim_patch_emb: null
+  dim_token: null
+  dim_token_emb: null
+  conv_kernel_size: null
+  global_local_decoder_residual_layer: null
+  eos_id: 2
+  recompute_fc1_out: false
+  recompute_fc3_out: false
+  recompute_attn: false
+  custom_bwd: false
+  layer_ckpt: none
+  full_logging_n_layers: 4
+  log_patch_lengths: false
+
+checkpoint:
+  path: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-1b-dclm-100b-scratch-entropy/checkpoints
+  init_ckpt_path: null
+  continue_training_from_init: false
+  s3_profile: null
+  dump:
+    every: 1000
+    keep: 1
+  eval:
+    every: 500000
+    keep: -1
+
+env:
+  ENABLE_INTRA_NODE_COMM: '1'
+  MKL_NUM_THREADS: '1'
+  MKL_SERVICE_FORCE_INTEL: GNU
+  NCCL_DEBUG: WARN
+  NCCL_IB_TIMEOUT: '22'
+  OMP_NUM_THREADS: '1'
+  TORCH_NCCL_ASYNC_ERROR_HANDLING: '1'
+  TORCH_NCCL_AVOID_RECORD_STREAMS: '1'
+
+profiling:
+  run: false
+  mem_steps: 4
+  mem_warmup: 0
+  profile_steps: 4
+  profile_warmup: 100
+  trace_folder: profiling
+
+logging:
+  freq: 10
+  acc_freq: null
+  wandb: null
+
+eval: null
+eval_on_gpus: null
+async_eval_gpus: null
+debug_dynamo: false

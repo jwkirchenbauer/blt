@@ -1,0 +1,61 @@
+schema_version: 1
+
+dataset:
+  repo_id: mlfoundations/dclm-baseline-1.0
+  repo_type: dataset
+  revision: a3b142c183aebe5af344955ae20836eb34dcf69b
+  license: CC-BY-4.0
+  source_format: jsonl.zst
+  text_field: text
+  upstream_file_count: 27838
+  upstream_compressed_bytes: 7196105155016
+
+selection:
+  seed: 42
+  file_order: "ascending sha256('blt-dclm-file-v1\\0' + seed + '\\0' + source_path)"
+  record_transform: none
+  source_join: "manifest order; insert LF only at a missing boundary between archives"
+  validation_rule: "after terashuf and round-robin split, remove the first 10000 records from every chunk"
+  train_shard_rule: "GNU split -n r/n_chunks over the global terashuf output"
+  text_transform: none
+  retain_fields: all
+
+shuffle:
+  implementation: terashuf
+  repository: https://github.com/alexandres/terashuf
+  revision: 29a65ed74808925266a5dcf4ffccd29552dad0e0
+  source_sha256: 05b08bfed31765b6f4f3430efbc06442459292a2d8f6f68612d4053026ca678c
+  seed: 42
+  production_memory_gib: 192
+  compiler: "GCC 13.3.1"
+  note: "Input order, memory, standard-library implementation, and seed are all permutation inputs."
+
+materializations:
+  pilot:
+    selected_source_files: 1
+    n_chunks: 64
+    validation_records_per_chunk: 100
+  entropy_rehearsal:
+    target_utf8_text_bytes: 1000000000
+    materialization: dclm-entropy-rehearsal-1b-v2
+    selected_source_files: 10
+    scanned_pre_validation_utf8_text_bytes: 6790860403
+    retained_post_validation_utf8_text_bytes: 3074249866
+    retained_post_validation_records: 531806
+    inserted_boundary_lf: 9
+    n_chunks: 64
+    validation_records_per_chunk: 10000
+  main_100b:
+    target_post_validation_utf8_text_bytes: 100000000000
+    target_pre_validation_utf8_text_bytes: 110000000000
+    pilot_estimated_source_files: 184
+    pilot_estimated_pre_validation_utf8_text_bytes: 110317786909
+    selection_finalization: "scan downloaded files in selection order and use the shortest whole-file prefix reaching 110B; after shuffling, require at least 100B remains after repository-equivalent validation removal"
+    n_chunks: 64
+    validation_records_per_chunk: 10000
+
+accounting:
+  record_utf8_text_bytes: true
+  record_blt_positions_including_bos_eos: true
+  record_documents: true
+  checksum: sha256
