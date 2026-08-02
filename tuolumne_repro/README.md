@@ -1038,3 +1038,32 @@ Step 19,500 is the recovery checkpoint: it contains all eight DCP shards,
 metadata, parameters, and rank-local iterator states. The failed downstream
 consolidation and scoring wrappers produced no usable scratch-entropy output;
 they must be replaced after the resumed trainer reaches step 100,000.
+
+### Entropy instability and gradient-clipping repair
+
+The step-19,500 continuation remained stable through approximately step 32,000,
+then developed sustained gradient growth and rising loss. Loss averaged 0.7933
+in the step-31k window with a median gradient norm of 0.0693. By the step-37k
+window, loss averaged 2.6552 and the gradient norm had reached 4,288. A
+500-step-window audit of the corresponding raw documents found no boundary or
+meaningful change in text lengths, quality, language, byte entropy, character
+composition, or source domains.
+
+The cause of the uncontrolled growth was at least partly an upstream clipping
+defect in `fixed_clip_grad_norm_`. The helper converted FP32 FSDP gradients to
+new BF16 tensors to make the distributed norm reduction work, but then applied
+the clipping coefficient to those temporary tensors instead of the original
+FP32 gradients. It therefore reported the pre-clip norm while leaving the
+optimizer gradients unchanged. The repair retains the BF16 norm computation
+and applies its coefficient to the original gradients. A two-node, eight-rank
+MI300A FSDP regression measured an FP32 global norm of 532,480 before clipping
+and 1.0 afterward.
+
+The divergent chain was canceled without deleting its artifacts. The repaired
+continuation uses
+`configs/entropy_100m_2n_clipfix_r32k.yaml` and a private copy of the complete
+step-32,000 distributed checkpoint. It deliberately retains the released
+clip-10 threshold, batch, optimizer, scheduler, model, and data configuration;
+the only mathematical code change is making the configured clipping operation
+effective. This is distinct from a later paper-recipe comparison using a
+clip-1 threshold.

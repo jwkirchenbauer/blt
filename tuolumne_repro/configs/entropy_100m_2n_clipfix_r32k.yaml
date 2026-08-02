@@ -1,0 +1,11 @@
+# Continue the released entropy recipe from the last checkpoint before the
+# step-32.5k gradient growth, using the repaired FP32 gradient clipping path.
+# The copied checkpoint root contains only the complete step-32,000 state.
+
+config: tuolumne_repro/configs/entropy_100m_2n.yaml
+
+dump_dir: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-entropy-100m-dclm-100b-clipfix-r32k
+name: blt-repro-entropy-100m-dclm-100b-clipfix-r32k
+
+checkpoint:
+  path: /p/vast1/kirchenb/hlm-root/tuo-runs/blt-repro-entropy-100m-dclm-100b-clipfix-r32k/checkpoints

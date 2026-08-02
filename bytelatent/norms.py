@@ -42,20 +42,21 @@ def fixed_clip_grad_norm_(
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    grads = [p.grad.to(torch.bfloat16) for p in parameters if p.grad is not None]
+    grads = [p.grad for p in parameters if p.grad is not None]
+    norm_grads = [grad.to(torch.bfloat16) for grad in grads]
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if len(grads) == 0:
         return torch.tensor(0.0)
-    first_device = grads[0].device
-    grouped_grads: Dict[
+    first_device = norm_grads[0].device
+    grouped_norm_grads: Dict[
         Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
-        [grads]
+        [norm_grads]
     )  # type: ignore[assignment]
 
     norms: List[Tensor] = []
-    for (device, _), ([device_grads], _) in grouped_grads.items():  # type: ignore[assignment]
+    for (device, _), ([device_grads], _) in grouped_norm_grads.items():  # type: ignore[assignment]
         if (foreach is None and _has_foreach_support(device_grads, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
@@ -83,6 +84,9 @@ def fixed_clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+    grouped_grads: Dict[
+        Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
+    ] = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
     for (device, _), ([device_grads], _) in grouped_grads.items():  # type: ignore[assignment]
         if (foreach is None and _has_foreach_support(device_grads, device)) or (
             foreach and _device_has_foreach_support(device)
