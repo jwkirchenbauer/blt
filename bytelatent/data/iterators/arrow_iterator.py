@@ -6,6 +6,7 @@ from typing import Any, Generator
 
 import fsspec
 import pyarrow as pa
+import pyarrow.json as pa_json
 
 # pyarrow needs the initialization from this import
 import pyarrow.dataset  # pyright: ignore
@@ -22,6 +23,19 @@ from bytelatent.data.iterators.abstract_iterator import (
 from bytelatent.preprocess.preprocess_entropies import get_id_key, get_text
 
 logger = getLogger(__name__)
+
+# PyArrow's 1 MiB JSON default cannot parse individual DCLM records that cross
+# two block boundaries.  This changes only parser I/O chunking; records and
+# their order are unchanged.
+JSON_READ_BLOCK_SIZE = 8 * 1024 * 1024
+
+
+def _pyarrow_file_format(file_format: str):
+    if file_format == "json":
+        return pa.dataset.JsonFileFormat(
+            read_options=pa_json.ReadOptions(block_size=JSON_READ_BLOCK_SIZE)
+        )
+    return file_format
 
 
 class ArrowFileIteratorState(PydanticIteratorState):
@@ -210,7 +224,9 @@ class ArrowFileIterator(StatefulIterator):
             else:
                 filesystem = None
             self.dataset = pa.dataset.dataset(
-                self.dataset_files, format=self.file_format, filesystem=filesystem
+                self.dataset_files,
+                format=_pyarrow_file_format(self.file_format),
+                filesystem=filesystem,
             )
         self.iter_id += 1
         if self.batch_to_consume is not None:
@@ -289,7 +305,9 @@ class ArrowFileIterator(StatefulIterator):
             else:
                 filesystem = None
             self.dataset = pa.dataset.dataset(
-                self.dataset_files, format=self.file_format, filesystem=filesystem
+                self.dataset_files,
+                format=_pyarrow_file_format(self.file_format),
+                filesystem=filesystem,
             )
             self.batch_iterator = self.dataset.to_batches(
                 batch_size=self.arrow_batch_size

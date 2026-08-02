@@ -995,3 +995,46 @@ data-layout transformations only; they do not change record contents or
 introduce a replacement shuffle. The 16-node recipe checker subsequently
 passed every required production-data and non-capacity gate; capacity remains
 intentionally pending until the full corpus has been entropy-scored.
+
+### Production official-entropy result
+
+The official-checkpoint scoring pass completed in two stages after four tasks
+on one node saw a transient incomplete view of the shared PyTorch environment.
+The 60 unaffected ranks from job `f3PP5FhXkKBV` were retained, and the four
+missing logical ranks 36--39 were repaired without rewriting completed output
+by job `f3PVN6FNet6T`. Validation job `f3PVNhSUr6yd` then established 64 Arrow
+files, 64 completion markers, 64 world-64 rank summaries, 18,849,094 records,
+and 106,825,419,124 token positions.
+
+The DCLM-calibrated threshold is 1.4375, producing 23,672,277,964 patches and
+a realized patch size of 4.512680. At the released threshold
+1.335442066192627, this corpus instead realizes patch size 4.141402. Every
+world-64 stream covers the selected 5,299-step batch-4/accumulation-4 recipe
+without repeating a complete shuffle buffer. The machine-readable result is
+`$VAST_PT/datasets/blt/entropy/dclm-100b-v1/official/validation_all_64_world64_acc4.json`.
+
+### Scratch entropy interruption and JSON-reader recovery
+
+The first production scratch-entropy run `f3NwCjPtpjDR` was numerically stable
+through step 19,710, then rank 7 failed while reading its raw JSON view:
+
+```text
+pyarrow.lib.ArrowInvalid: straddling object straddles two block boundaries
+```
+
+PyArrow 25 defaults to a 1,048,576-byte JSON read block. A complete max-line
+audit of all eight lossless training views found a corpus maximum of 1,432,107
+bytes at line 228,330 of world-8 chunk 7. The iterator now uses an 8 MiB JSON
+read block in both initial and resumed reads. This is an I/O-buffer correction:
+it does not transform, filter, reorder, or rechunk JSON records. On the failing
+file, the stock reader reproduced the failure after 228,262 yielded records;
+the corrected reader passed 230,000 records, and both readers produced the
+same SHA-256 digest
+`c8b2fab9d5ed8e375abaece383dceb3d8028a96d0d165bc708087aeadbad6556`
+over the first 225,000 parsed `(id, text)` pairs. A regression test also covers
+initial and resumed iteration across a synthetic 2 MiB record.
+
+Step 19,500 is the recovery checkpoint: it contains all eight DCP shards,
+metadata, parameters, and rank-local iterator states. The failed downstream
+consolidation and scoring wrappers produced no usable scratch-entropy output;
+they must be replaced after the resumed trainer reaches step 100,000.

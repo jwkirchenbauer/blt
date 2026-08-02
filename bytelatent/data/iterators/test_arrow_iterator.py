@@ -1,4 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+import json
+from pathlib import Path
+
 import numpy as np
 import pyarrow as pa
 
@@ -112,3 +115,48 @@ def test_read_jsonl_from_arrow():
     for i, example in enumerate(iterator):
         assert example.sample_id == str(i)
         assert example.text == f"test_{i}"
+
+
+def test_read_large_jsonl_record(tmp_path: Path):
+    jsonl_path = tmp_path / "large_record.jsonl"
+    records = [
+        {"id": "0", "text": "a" * (2 * 1024 * 1024)},
+        {"id": "1", "text": "after-large-record"},
+    ]
+    jsonl_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    arrow_iterator = ArrowFileIterator(
+        file_path=str(jsonl_path),
+        num_workers=1,
+        worker_id=0,
+        preprocess_dir=None,
+        entropy_model_name=None,
+        file_format="json",
+        arrow_batch_size=100,
+    )
+
+    examples = list(arrow_iterator.create_iter())
+    assert [example.sample_id for example in examples] == ["0", "1"]
+    assert [example.text for example in examples] == [
+        records[0]["text"],
+        records[1]["text"],
+    ]
+
+    resumed_state = ArrowFileIteratorState(
+        file_path=str(jsonl_path),
+        num_workers=1,
+        worker_id=0,
+        preprocess_dir=None,
+        entropy_model_name=None,
+        dataset_files=None,
+        row_num=1,
+        arrow_batch_size=100,
+        s3_profile=None,
+        file_format="json",
+    )
+    resumed_example = next(resumed_state.build().create_iter())
+    assert resumed_example.sample_id == "1"
+    assert resumed_example.text == records[1]["text"]
